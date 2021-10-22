@@ -1,0 +1,154 @@
+---
+title: "Data 608 HW 3"
+author: "Layla Quinones"
+date: "10/21/2021"
+output: 
+  pdf_document: default
+  html_document: default
+runtime: shiny
+---
+
+```{r, message = FALSE, warning = FALSE}
+library(shiny)
+library(DT)
+library(plotly)
+library(ggplot2)
+library(tidyverse)
+library(googleVis)
+library(rsconnect)
+suppressPackageStartupMessages(library(googleVis))# hides messages
+```
+
+# Question 1
+
+As a researcher, you frequently compare mortality rates from particular causes across different States. 
+You need a visualization that will let you see (for 2010 only) the crude mortality rate, across all States, from one cause (for example, Neoplasms, which are effectively cancers). 
+
+Create a visualization that allows you to rank States by crude mortality for each cause of death.
+
+## Approach:
+
+First we want to get started by installing all packages (above) and looking a the data to get a sense of what is in the raw data set to help inform data cleaning and next steps. 
+
+```{r}
+# Load data
+rawData <- read.csv("https://raw.githubusercontent.com/charleyferrari/CUNY_DATA_608/master/module3/data/cleaned-cdc-mortality-1999-2010-2.csv", header = TRUE, stringsAsFactors = FALSE)
+
+# look at the data
+head(rawData)
+```
+
+We see that there is a column specifically for year so we want to subset the data by the year 2010.
+
+```{r}
+# Select 2010 only
+data2010 <- subset(rawData, Year==2010)
+
+#display new data
+head(data2010)
+```
+
+```{r}
+# Identify all possbile causes for death
+causes <- unique(data2010$ICD.Chapter)
+
+#display
+causes
+```
+
+
+```{r}
+# Create server 
+UIone <- fluidPage(
+  titlePanel("2010 CDC Mortality Rates"),
+  fluidRow(selectInput("cause", "Cause of Death:", choices=sort(causes))), 
+  plotOutput("plotOne", height = 800)
+)
+
+# Deine UI
+serverOne <- function(input, output) {
+  rates <- reactive({rates <- subset(data2010, ICD.Chapter==input$cause)}) #input must match the server
+  output$plotOne <- renderPlot({ #output must match the server
+    ggplot(rates(), aes(x = Crude.Rate, y = reorder(State, -Crude.Rate))) +
+      scale_x_continuous(limits = c(0, max(rates()$Crude.Rate) + max(rates()$Crude.Rate)/10), expand = c(0,0)) + # allow axis to be a good size to show text
+      expand_limits(x = 0) +  #force axis to start at 0
+      geom_segment(aes(yend = State), xend = 0, color = "purple") +
+      geom_point(size=3, color = "green") +
+      geom_text(aes(x = rates()$Crude.Rate + max(rates()$Crude.Rate)/20, y = reorder(State, -Crude.Rate), label= rates()$Crude.Rate)) +
+      theme_bw() +
+      theme(panel.grid.major.y = element_blank(), axis.title=element_text(size=14))+
+      xlab("2010 CDC Mortality Rate") +
+      ylab("State") +
+      ggtitle(input$cause)
+  }) 
+}
+```
+
+
+```{r}
+#Run the shiny app
+shinyApp(ui = UIone, server = serverOne)
+```
+
+# Question 2
+
+Often you are asked whether particular States are improving their mortality rates (per cause) faster than, or slower than, the national average. Create a visualization that lets your clients see this for themselves for one cause of death at the time. Keep in mind that the national average should be weighted by the national population.
+
+```{r}
+# Get all states that appear at least once
+states<-unique(rawData$State)
+
+#display
+states
+```
+
+```{r}
+# Create UI script
+UItwo <- fluidPage(
+  title = "State Mortality Rates Over Time",
+  fluidRow(
+    column(6, selectInput('causes', 'Cause of Death', choices=sort(causes)) ), # allow user to choose state AND cause
+    column(6, selectInput('states', 'State', choices=sort(states)) )
+  ),
+  fluidRow(
+    plotOutput('myplot')
+  )
+)
+```
+
+```{r}
+# Create server script
+serverTwo <- function(input, output) {
+  output$myplot <- renderPlot({
+    
+    #selecting only states and causes
+    data <- rawData %>% 
+      filter(State == input$states, ICD.Chapter == input$causes)
+    
+    #calculate the weighted average(considering the population) by Year
+    usAverage <- rawData %>% 
+      filter(ICD.Chapter == input$causes) %>% 
+      group_by(Year) %>% 
+      summarise(annualRate = (sum(as.numeric(Deaths))/sum(as.numeric(Population))*100000))
+   
+    #plot
+    ggplot(data, aes(x=Year, y=Crude.Rate)) + 
+      geom_point(aes(color = "blue"), size=2) + 
+      geom_line(aes(x=Year, y=Crude.Rate, color = "blue"))+
+      geom_line(aes(x = usAverage$Year, y = usAverage$annualRate, color='green'), size=2) + 
+      scale_y_continuous(limits = c(0, max(usAverage$annualRate) + max(usAverage$annualRate/10), expand = c(0,0))) +
+      expand_limits( y = 0) +  #force axis to start at 0
+      geom_text(aes(x = usAverage$Year, y = usAverage$annualRate, label = round(usAverage$annualRate, digits = 1)))+
+      geom_text(aes(x = Year, y = Crude.Rate, label = round(Crude.Rate, digits = 1)))+
+      scale_color_manual(name='Legend', 
+                         values=c('blue', 'green'),
+                         labels=c('State', 'National Average'))
+  })
+}
+```
+
+```{r}
+shinyApp(ui = UItwo, server = serverTwo)
+```
+
+
